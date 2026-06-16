@@ -1,0 +1,147 @@
+@startuml implantacao
+title Diagrama de Implantação – Portal JES / SGDU
+
+skinparam nodeBackgroundColor #E8F0FE
+skinparam nodeBorderColor #3366CC
+skinparam databaseBackgroundColor #FFF9C4
+skinparam databaseBorderColor #888800
+skinparam componentBackgroundColor #F0FFF0
+skinparam componentBorderColor #336633
+skinparam ArrowColor #444444
+skinparam cloudBackgroundColor #FFF5EE
+skinparam cloudBorderColor #CC6600
+
+' ════════════════════════════════════
+' CAMADA DO CLIENTE
+' ════════════════════════════════════
+node "Dispositivo do Usuário" as ClientNode <<device>> {
+  node "Navegador Web" as Browser <<browser>> {
+    component "Interface Tailwind CSS\n(Templates Django)" as UI
+    component "Token CSRF\n[RNF007]" as CSRF
+  }
+  note right of Browser
+    Chrome, Firefox, Edge
+    Desktop e dispositivos móveis
+    Autenticação obrigatória (N1/N2/N3)
+    Homepage pública sem autenticação
+  end note
+}
+
+' ════════════════════════════════════
+' CAMADA DE APLICAÇÃO (SERVIDOR WEB)
+' ════════════════════════════════════
+node "Servidor de Aplicação\n(Python 3.x + Django)" as AppServer <<server>> {
+
+  component "URLs / Roteador\n(urls.py)" as Router
+
+  node "Camada MVT – Django" as MVT {
+    component "Views (Lógica de Negócio)\n[verificação de sessão em toda view – RNF003]" as Views
+    component "Templates (Apresentação)\n[auto-escaping XSS – RNF009]" as Templates
+    component "Models (Entidades)\n[Atleta, Equipe, Atletica, Partida,\nModalidade, Sumula]" as Models
+  }
+
+  node "Módulos de Segurança" as Security {
+    component "RBAC\n(N1 Capitão / N2 Moderador / N3 Admin)\n[RNF002]" as RBAC
+    component "Auth Backend\n(matrícula + PBKDF2+salt)\n[RNF001, RNF005]" as Auth
+    component "Middleware CSRF\n[RNF007]" as CSRFMiddleware
+    component "Validadores\n(formulários e regras de negócio\nRN001–RN006)" as Validators
+  }
+
+  component "Django ORM\n[proteção SQL Injection – RNF008]" as ORM
+
+  component "File Storage\n(fotos de atletas, planilhas .xlsx/.csv)" as Storage
+}
+
+' ════════════════════════════════════
+' CAMADA DE CACHE
+' ════════════════════════════════════
+node "Servidor de Cache\n(Redis)" as CacheServer <<server>> {
+  database "Cache em Memória\n[consultas frequentes – RNF012\natraso máx. 1 dia na homepage]" as RedisCache
+  note right of RedisCache
+    Previsto no roadmap
+    Reduz latência em picos de
+    tráfego durante inscrições
+  end note
+}
+
+' ════════════════════════════════════
+' CAMADA DE DADOS
+' ════════════════════════════════════
+node "Servidor de Banco de Dados" as DBServer <<server>> {
+  database "Banco de Dados Relacional\n(PostgreSQL / SQLite em dev)" as DB {
+    collections "Usuários (Admin, Moderador, Capitão)"
+    collections "Atletas / Atléticas / Equipes"
+    collections "Modalidades / Partidas / Súmulas"
+    collections "Logs de Auditoria (fuso Brasília)\n[RNF010]"
+  }
+}
+
+' ════════════════════════════════════
+' SISTEMA EXTERNO – SUAP
+' ════════════════════════════════════
+cloud "Ecossistema IFPB" as IFPB_Cloud {
+  node "SUAP\n(Sistema Unificado de Administ.\nPública)" as SUAP <<external system>> {
+    component "API de Validação\nAcadêmica" as SUAP_API
+    note right of SUAP_API
+      Protocolo seguro [RNF013]
+      Valida matrícula e vínculo
+      acadêmico dos atletas
+    end note
+  }
+}
+
+' ════════════════════════════════════
+' HOSPEDAGEM / CLOUD (IES externas)
+' ════════════════════════════════════
+cloud "Cloud Provider\n(Vercel / AWS / DigitalOcean)" as CloudProvider {
+  note bottom
+    Suporte a Python/Django
+    Planos educacionais de baixo custo
+    Escalabilidade horizontal [RNF011]
+    Disponibilidade 24/7 durante JES
+  end note
+}
+
+' ════════════════════════════════════
+' AMBIENTE DE DESENVOLVIMENTO
+' ════════════════════════════════════
+node "Ambiente Dev / Teste\n(acesso restrito – equipe técnica)" as DevEnv <<environment>> {
+  component "Django Dev Server\n(isolado de produção)" as DevServer
+  database "Banco de Dados de Teste" as DevDB
+}
+
+' ════════════════════════════════════
+' CONEXÕES
+' ════════════════════════════════════
+Browser --> Router : HTTPS\n(requisições HTTP com CSRF token)
+Router --> Views : despacha requisição
+Views --> RBAC : verifica permissão
+Views --> Auth : autentica usuário
+Views --> Validators : valida dados
+Views --> Templates : renderiza resposta
+Views --> Models : acessa entidades
+Models --> ORM : abstrai SQL
+ORM --> DB : queries seguras\n(sem raw SQL – RNF008)
+
+Views --> RedisCache : lê / escreve cache
+RedisCache --> DB : miss → busca dados
+
+Views --> SUAP_API : HTTPS seguro\n[RNF013] – valida matrícula
+
+AppServer --> CloudProvider : deploy em produção
+DevEnv ..> AppServer : isolado\n(não compartilha banco)
+
+' ════════════════════════════════════
+' LEGENDA
+' ════════════════════════════════════
+legend right
+  | Símbolo | Significado |
+  | <<server>> | Servidor físico ou virtual |
+  | <<browser>> | Aplicação cliente no navegador |
+  | <<external system>> | Sistema fora do escopo do SGDU |
+  | <<environment>> | Ambiente isolado |
+  |  Linha sólida | Comunicação em runtime |
+  |  Linha pontilhada | Isolamento / sem comunicação direta |
+endlegend
+
+@enduml

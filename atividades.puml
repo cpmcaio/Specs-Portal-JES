@@ -1,0 +1,312 @@
+' ════════════════════════════════════════════════
+' AT-01: Fluxo de Autenticação e Primeiro Acesso
+' ════════════════════════════════════════════════
+@startuml AT-01_Autenticacao
+
+title AT-01 – Autenticação e Primeiro Acesso
+
+skinparam activityBackgroundColor #FEFEFE
+skinparam activityBorderColor #555555
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #888800
+skinparam ArrowColor #444444
+skinparam swimlaneBackgroundColor #F5F8FF
+skinparam swimlaneBorderColor #AAAAAA
+
+|Usuário|
+start
+:Acessar /login;
+:Informar matrícula e senha;
+
+|Sistema|
+:Verificar credenciais no banco\n(matrícula + hash da senha);
+
+if (Credenciais válidas?) then (não)
+  :Exibir "Credenciais Inválidas"\n[mensagem genérica – RNF004];
+  |Usuário|
+  :Tentar novamente ou abandonar;
+  stop
+else (sim)
+  if (primeiro_acesso == True?) then (sim)
+    :Bloquear acesso ao dashboard;
+    :Redirecionar para /primeiro-acesso;
+
+    |Usuário|
+    repeat
+      :Informar nova senha e confirmação;
+      |Sistema|
+      :Validar política de senha\n[RNF006: 8+ chars, maiúscula,\nminúscula, número, sem blacklist];
+      if (Senha válida?) then (não)
+        :Exibir erros de validação;
+        |Usuário|
+      else (sim)
+      end if
+    repeat while (Senha válida?) is (não)
+    -> sim;
+
+    |Sistema|
+    :Salvar novo hash PBKDF2+salt [RNF005];
+    :Marcar primeiro_acesso = False;
+  else (não)
+  end if
+
+  :Criar sessão autenticada;
+  :Redirecionar para /dashboard\nconforme nível de acesso (N1/N2/N3);
+
+  |Usuário|
+  :Usar o sistema;
+  stop
+end if
+
+@enduml
+
+
+' ════════════════════════════════════════════════
+' AT-02: Cadastro de Atleta
+' ════════════════════════════════════════════════
+@startuml AT-02_Cadastro_Atleta
+
+title AT-02 – Cadastro de Atleta pelo Capitão (RF001)
+
+skinparam activityBackgroundColor #FEFEFE
+skinparam activityBorderColor #555555
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #888800
+skinparam ArrowColor #444444
+skinparam swimlaneBackgroundColor #F5F8FF
+skinparam swimlaneBorderColor #AAAAAA
+
+|Capitão|
+start
+:Acessar /atletas/cadastrar;
+
+|Sistema|
+:Verificar sessão e nível N1;
+
+if (Autorizado?) then (não)
+  :Redirecionar para /login;
+  stop
+else (sim)
+  |Capitão|
+  :Visualizar formulário de cadastro;
+
+  repeat
+    :Preencher dados:\n- Nome\n- Matrícula\n- Sexo\n- Data de Nascimento\n- Foto;
+
+    |Sistema|
+    :Validar matrícula\n[RN001: só números, 6–10 dígitos];
+    :Verificar unicidade da matrícula;
+    :Validar data de nascimento\n[RN002: não futura, idade 14–100 anos];
+
+    if (Dados válidos?) then (não)
+      :Exibir erros de validação;
+      |Capitão|
+    else (sim)
+    end if
+  repeat while (Dados válidos?) is (não)
+  -> sim;
+
+  |Sistema|
+  :Salvar Atleta vinculado\nà atlética do Capitão;
+  |Capitão|
+  :Visualizar confirmação de cadastro;
+  stop
+end if
+
+@enduml
+
+
+' ════════════════════════════════════════════════
+' AT-03: Criação de Equipe
+' ════════════════════════════════════════════════
+@startuml AT-03_Criacao_Equipe
+
+title AT-03 – Criação de Equipe pelo Capitão (RF006)
+
+skinparam activityBackgroundColor #FEFEFE
+skinparam activityBorderColor #555555
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #888800
+skinparam ArrowColor #444444
+skinparam swimlaneBackgroundColor #F5F8FF
+skinparam swimlaneBorderColor #AAAAAA
+
+|Capitão|
+start
+:Acessar /equipes/criar;
+
+|Sistema|
+:Verificar sessão e nível N1;
+
+if (Autorizado?) then (não)
+  :Redirecionar para /login;
+  stop
+else (sim)
+  |Capitão|
+  :Visualizar formulário com\natletas e modalidades disponíveis;
+
+  repeat
+    :Preencher:\n- Nome da equipe\n- Modalidade\n- Atletas selecionados;
+
+    |Sistema|
+    :Validar nome único por atlética/modalidade [RN004];
+    :Verificar se todos os atletas\npertencem à atlética do Capitão [RN004];
+    :Verificar quantidade de atletas\n[RN004: entre mín. e máx. da Modalidade];
+    :Verificar duplicatas na seleção [RN004];
+
+    if (Dados válidos?) then (não)
+      :Exibir erros de validação;
+      |Capitão|
+    else (sim)
+    end if
+  repeat while (Dados válidos?) is (não)
+  -> sim;
+
+  |Sistema|
+  :Salvar Equipe;
+  |Capitão|
+  :Visualizar confirmação;
+  stop
+end if
+
+@enduml
+
+
+' ════════════════════════════════════════════════
+' AT-04: Upload de Planilha de Partidas
+' ════════════════════════════════════════════════
+@startuml AT-04_Upload_Planilha
+
+title AT-04 – Upload de Planilha de Partidas (RF008 + RN006)
+
+skinparam activityBackgroundColor #FEFEFE
+skinparam activityBorderColor #555555
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #888800
+skinparam ArrowColor #444444
+skinparam swimlaneBackgroundColor #F5F8FF
+skinparam swimlaneBorderColor #AAAAAA
+
+|Moderador / Admin|
+start
+:Acessar /partidas/planilha;
+
+|Sistema|
+:Verificar sessão e nível >= N2;
+
+if (Autorizado?) then (não)
+  :Redirecionar para /login;
+  stop
+else (sim)
+  |Moderador / Admin|
+  :Visualizar formulário de upload;
+  :Selecionar e enviar arquivo .xlsx ou .csv;
+
+  |Sistema|
+  :Verificar extensão do arquivo;
+  if (Extensão permitida?) then (não)
+    :Exibir "Formato inválido";
+    stop
+  else (sim)
+  end if
+
+  :Verificar padrões de registros\n[RN006: colunas obrigatórias e formatos];
+  if (Padrão inválido?) then (sim)
+    :Gerar e exibir relatório de erros;\nnenhum dado é importado;
+    stop
+  else (não)
+  end if
+
+  :Validar tipos de esporte\ncontra modalidades cadastradas;
+  if (Modalidade inexistente?) then (sim)
+    :Gerar e exibir relatório de erros;\nnenhum dado é importado;
+    stop
+  else (não)
+  end if
+
+  :Aplicar algoritmo de abstração de dados\n[RN006: detectar erros manuais dos árbitros];
+  if (Erros detectados?) then (sim)
+    :Exibir relatório detalhado\nde inconsistências;\nnenhum dado é importado;
+    stop
+  else (não)
+  end if
+
+  :Criar partidas em lote no banco;
+
+  fork
+    :Gerar Súmula automática\npara cada partida [RN005];
+  fork again
+    :Registrar PlanilhaUpload\ncom status = "validado";
+  end merge
+
+  |Moderador / Admin|
+  :Visualizar confirmação\ncom total de partidas importadas;
+  stop
+end if
+
+@enduml
+
+
+' ════════════════════════════════════════════════
+' AT-05: Gerenciamento de Partida pelo Moderador
+' ════════════════════════════════════════════════
+@startuml AT-05_Gerenciamento_Partida
+
+title AT-05 – Gerenciamento de Partida (RF007)
+
+skinparam activityBackgroundColor #FEFEFE
+skinparam activityBorderColor #555555
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #888800
+skinparam ArrowColor #444444
+skinparam swimlaneBackgroundColor #F5F8FF
+skinparam swimlaneBorderColor #AAAAAA
+
+|Moderador|
+start
+:Acessar /partidas/criar;
+
+|Sistema|
+:Verificar sessão e nível >= N2;
+
+if (Autorizado?) then (não)
+  :Redirecionar para /login;
+  stop
+else (sim)
+  |Moderador|
+  :Visualizar formulário de partida;
+
+  repeat
+    :Preencher:\n- Equipe mandante\n- Equipe visitante\n- Modalidade\n- Data/Hora\n- Local\n- Fase (grupos/quartas/semis/final)\n- Status;
+
+    |Sistema|
+    :Validar equipes distintas\ne pertencentes à mesma modalidade;
+
+    if (Dados válidos?) then (não)
+      :Exibir erros de validação;
+      |Moderador|
+    else (sim)
+    end if
+  repeat while (Dados válidos?) is (não)
+  -> sim;
+
+  |Sistema|
+  :Salvar Partida;
+  :Gerar Súmula automática\n[RN005 – via signal post_save];
+
+  if (Status = encerrada?) then (sim)
+    |Moderador|
+    :Registrar placar final;
+    |Sistema|
+    :Atualizar status = "encerrada";
+    :Calcular vencedor;
+    :Atualizar tabela de classificação;
+  else (não)
+  end if
+
+  |Moderador|
+  :Visualizar confirmação;
+  stop
+end if
+
+@enduml

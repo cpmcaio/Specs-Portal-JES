@@ -1,0 +1,247 @@
+@startuml sequencia
+title Diagramas de Sequência – Portal JES / SGDU
+
+skinparam sequenceArrowThickness 1.5
+skinparam sequenceGroupBorderColor #888888
+skinparam sequenceBoxBackgroundColor #F5F5F5
+skinparam participantBackgroundColor #E8F0FE
+skinparam participantBorderColor #555555
+skinparam sequenceLifeLineBorderColor #AAAAAA
+
+' ════════════════════════════════════════════════
+' SD-01: Autenticação com Primeiro Acesso
+' ════════════════════════════════════════════════
+newpage SD-01 – Autenticação e Troca de Senha no Primeiro Acesso
+
+actor "Usuário\n(Capitão/Mod/Admin)" as User
+participant "View\n(LoginView)" as Login
+participant "RBAC\n(Auth Backend)" as RBAC
+database "Banco de Dados" as DB
+
+User -> Login : POST /login\n{matricula, senha}
+activate Login
+
+Login -> RBAC : autenticar(matricula, senha)
+activate RBAC
+
+RBAC -> DB : SELECT usuario WHERE matricula=?
+activate DB
+DB --> RBAC : registro encontrado / nenhum
+deactivate DB
+
+alt credenciais inválidas (matrícula ou senha incorreta)
+  RBAC --> Login : AuthenticationFailed
+  deactivate RBAC
+  Login --> User : HTTP 200 – "Credenciais Inválidas"\n[mensagem genérica – RNF004]
+else credenciais válidas
+  RBAC --> Login : user_object
+  deactivate RBAC
+
+  Login -> DB : SELECT primeiro_acesso WHERE user=?
+  activate DB
+  DB --> Login : primeiro_acesso
+  deactivate DB
+
+  alt primeiro_acesso == True  [RF010]
+    Login --> User : HTTP 302 – Redirect /primeiro-acesso
+    deactivate Login
+
+    User -> Login : GET /primeiro-acesso
+    activate Login
+    Login --> User : Formulário de nova senha
+    deactivate Login
+
+    User -> Login : POST /primeiro-acesso\n{nova_senha, confirmacao}
+    activate Login
+    Login -> Login : validar_politica_senha(nova_senha)\n[RNF006: 8+ chars, maiúscula,\nminúscula, número, sem blacklist]
+
+    alt senha inválida
+      Login --> User : HTTP 200 – Erros de validação
+    else senha válida
+      Login -> DB : UPDATE senha=hash(nova_senha),\nprimeiro_acesso=False
+      activate DB
+      DB --> Login : OK
+      deactivate DB
+      Login -> RBAC : criar_sessao(user)
+      Login --> User : HTTP 302 – Redirect /dashboard
+      deactivate Login
+    end
+
+  else primeiro_acesso == False
+    Login -> RBAC : criar_sessao(user)
+    Login --> User : HTTP 302 – Redirect /dashboard
+    deactivate Login
+  end
+end
+
+' ════════════════════════════════════════════════
+' SD-02: Cadastro de Atleta pelo Capitão
+' ════════════════════════════════════════════════
+newpage SD-02 – Cadastro de Atleta pelo Capitão (RF001)
+
+actor "Capitão" as Capitao
+participant "View\n(AtletaCreateView)" as View
+participant "RBAC\n(Decorator)" as RBAC2
+participant "Form\n(AtletaForm)" as Form
+participant "Model\n(Atleta)" as Model
+database "Banco de Dados" as DB2
+
+Capitao -> View : GET /atletas/cadastrar
+activate View
+View -> RBAC2 : verificar_sessao() + nivel >= N1
+activate RBAC2
+RBAC2 --> View : autorizado
+deactivate RBAC2
+View --> Capitao : Formulário de cadastro
+deactivate View
+
+Capitao -> View : POST /atletas/cadastrar\n{nome, matricula, sexo,\ndata_nascimento, foto}
+activate View
+
+View -> RBAC2 : verificar_sessao() + nivel >= N1
+activate RBAC2
+RBAC2 --> View : autorizado
+deactivate RBAC2
+
+View -> Form : validar(dados)
+activate Form
+
+Form -> DB2 : SELECT COUNT(*) WHERE matricula=?
+activate DB2
+DB2 --> Form : count
+deactivate DB2
+
+alt matrícula já existe
+  Form --> View : ValidationError("Matrícula já cadastrada")
+  View --> Capitao : HTTP 200 – Formulário com erros
+else matrícula única
+  Form -> Form : validar_matricula()\n[RN001: só números, 6-10 dígitos]
+  Form -> Form : validar_data_nascimento()\n[RN002: 14-100 anos, não futura]
+
+  alt dados inválidos
+    Form --> View : ValidationError(erros)
+    deactivate Form
+    View --> Capitao : HTTP 200 – Formulário com erros
+  else dados válidos
+    Form --> View : form válido
+    deactivate Form
+
+    View -> Model : Atleta.objects.create(\nmatricula, nome, sexo,\ndata_nascimento, foto,\natletica=capitao.atletica)
+    activate Model
+    Model -> DB2 : INSERT INTO atleta (...)
+    activate DB2
+    DB2 --> Model : atleta.id
+    deactivate DB2
+    Model --> View : atleta_obj
+    deactivate Model
+
+    View --> Capitao : HTTP 302 – Redirect /atletas\n+ mensagem "Atleta cadastrado com sucesso"
+    deactivate View
+  end
+end
+
+' ════════════════════════════════════════════════
+' SD-03: Criação de Partida e Geração de Súmula
+' ════════════════════════════════════════════════
+newpage SD-03 – Criação de Partida e Geração de Súmula Automática (RF007 + RN005)
+
+actor "Moderador" as Mod
+participant "View\n(PartidaCreateView)" as PView
+participant "RBAC" as RBAC3
+participant "Model\n(Partida)" as PModel
+participant "Model\n(Sumula)" as SModel
+database "Banco de Dados" as DB3
+participant "Signal\n(post_save)" as Signal
+
+Mod -> PView : POST /partidas/criar\n{equipe_mandante, equipe_visitante,\nmodalidade, data_hora, local, fase}
+activate PView
+
+PView -> RBAC3 : verificar_sessao() + nivel >= N2
+activate RBAC3
+RBAC3 --> PView : autorizado
+deactivate RBAC3
+
+PView -> PView : validar_equipes()\n[equipes de modalidades compatíveis,\nequipes distintas]
+
+PView -> PModel : Partida.objects.create(...)
+activate PModel
+PModel -> DB3 : INSERT INTO partida (...)
+activate DB3
+DB3 --> PModel : partida.id
+deactivate DB3
+PModel -> Signal : post_save(Partida, created=True)
+activate Signal
+
+Signal -> SModel : Sumula.gerar_automaticamente(partida)
+activate SModel
+SModel -> DB3 : SELECT template WHERE modalidade=?
+activate DB3
+DB3 --> SModel : template_sumula
+deactivate DB3
+SModel -> DB3 : INSERT INTO sumula\n(partida, modalidade, conteudo, gerada_em)
+activate DB3
+DB3 --> SModel : sumula.id
+deactivate DB3
+SModel --> Signal : sumula_obj  [RN005]
+deactivate SModel
+deactivate Signal
+
+PModel --> PView : partida_obj
+deactivate PModel
+
+PView --> Mod : HTTP 302 – Redirect /partidas\n+ mensagem "Partida e súmula criadas"
+deactivate PView
+
+' ════════════════════════════════════════════════
+' SD-04: Upload de Planilha de Partidas
+' ════════════════════════════════════════════════
+newpage SD-04 – Carregamento de Partidas por Planilha (RF008 + RN006)
+
+actor "Moderador/Admin" as ModAdmin
+participant "View\n(PlanilhaUploadView)" as UView
+participant "Validador\n(PlanilhaValidator)" as Validator
+participant "Model\n(PlanilhaUpload)" as UModel
+participant "Model\n(Partida)" as PM2
+database "Banco de Dados" as DB4
+
+ModAdmin -> UView : POST /partidas/planilha\n{arquivo.xlsx}
+activate UView
+
+UView -> UView : verificar_extensao()\n[.xlsx ou .csv]
+
+UView -> Validator : validar(arquivo)
+activate Validator
+
+Validator -> Validator : verificar_padroes_registros()\n[colunas obrigatórias, formatos]
+Validator -> Validator : validar_tipos_esporte()\n[modalidades existem no sistema?]
+Validator -> Validator : algoritmo_abstracao_dados()\n[detectar erros manuais de árbitros]
+
+alt erros encontrados
+  Validator --> UView : ValidationError(relatorio_erros)
+  deactivate Validator
+  UView -> DB4 : INSERT INTO planilha_upload\n(status='erro', relatorio_erros)
+  UView --> ModAdmin : HTTP 200 – Relatório de erros\nNenhuma partida criada
+  deactivate UView
+else planilha válida
+  Validator --> UView : dados_validados (list)
+  deactivate Validator
+
+  loop para cada partida na planilha
+    UView -> PM2 : Partida.objects.create(...)
+    activate PM2
+    PM2 -> DB4 : INSERT INTO partida (...)
+    PM2 --> UView : partida_obj (+ súmula via signal)
+    deactivate PM2
+  end
+
+  UView -> UModel : PlanilhaUpload.objects.create\n(status='validado')
+  activate UModel
+  UModel -> DB4 : INSERT INTO planilha_upload
+  UModel --> UView : upload_obj
+  deactivate UModel
+
+  UView --> ModAdmin : HTTP 302 – Redirect /partidas\n+ mensagem "X partidas importadas"
+  deactivate UView
+end
+
+@enduml

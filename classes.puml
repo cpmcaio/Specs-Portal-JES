@@ -1,0 +1,176 @@
+@startuml classes
+title Diagrama de Classes – Portal JES / SGDU
+
+skinparam classBackgroundColor #FEFEFE
+skinparam classBorderColor #555555
+skinparam ArrowColor #444444
+skinparam classHeaderBackgroundColor #E8F0FE
+skinparam stereotypeABorderColor #999999
+
+' ──────────── HIERARQUIA DE USUÁRIOS ────────────
+abstract class Usuario {
+  - id : int
+  - matricula : str  {único, 6-10 dígitos}
+  - nome : str
+  - senha_hash : str  {PBKDF2 + salt}
+  - primeiro_acesso : bool
+  - data_criacao : datetime
+  --
+  + autenticar(matricula, senha) : bool
+  + trocar_senha(nova_senha) : void
+  + get_nivel_acesso() : int
+}
+
+class Administrador {
+  --
+  + cadastrar_moderador(dados) : Moderador
+  + gerar_backup() : void
+  + visualizar_estatisticas() : dict
+}
+
+class Moderador {
+  --
+  + cadastrar_atletica(dados) : Atletica
+  + promover_capitao(atleta) : Capitao
+  + cadastrar_modalidade(dados) : Modalidade
+  + criar_partida(dados) : Partida
+  + carregar_planilha(arquivo) : list[Partida]
+}
+
+class Capitao {
+  - atletica : Atletica
+  --
+  + cadastrar_atleta(dados) : Atleta
+  + criar_equipe(dados) : Equipe
+}
+
+Usuario <|-- Administrador
+Usuario <|-- Moderador
+Usuario <|-- Capitao
+
+' ──────────── DOMÍNIO ESPORTIVO ────────────
+class Atleta {
+  - id : int
+  - matricula : str  {único, 6-10 dígitos}
+  - nome : str
+  - sexo : str  {M, F}
+  - data_nascimento : date  {14-100 anos}
+  - foto : ImageField
+  - atletica : Atletica
+  - data_cadastro : datetime
+  --
+  + pode_ser_excluido() : bool
+}
+
+class Atletica {
+  - id : int
+  - nome : str  {único, 3-255 chars}
+  - instituto : str
+  - campus : str
+  - cursos : list[str]
+  - capitao : Capitao
+  - data_criacao : datetime
+  --
+  + listar_atletas() : list[Atleta]
+  + listar_equipes() : list[Equipe]
+}
+
+class Modalidade {
+  - id : int
+  - nome : str
+  - descricao : str
+  - min_atletas : int
+  - max_atletas : int
+  --
+  + validar_tamanho_equipe(n) : bool
+}
+
+class Equipe {
+  - id : int
+  - nome : str  {único por atlética/modalidade}
+  - atletica : Atletica
+  - modalidade : Modalidade
+  - data_criacao : datetime
+  --
+  + adicionar_atleta(atleta) : void
+  + remover_atleta(atleta) : void
+  + validar_composicao() : bool
+}
+
+class Partida {
+  - id : int
+  - equipe_mandante : Equipe
+  - equipe_visitante : Equipe
+  - modalidade : Modalidade
+  - data_hora : datetime
+  - local : str
+  - fase : str  {fase_grupos, quartas, semis, final}
+  - status : str  {agendada, em_andamento, encerrada}
+  - placar_mandante : int
+  - placar_visitante : int
+  --
+  + encerrar(placar_m, placar_v) : void
+  + get_vencedor() : Equipe
+}
+
+class Sumula {
+  - id : int
+  - partida : Partida
+  - modalidade : Modalidade
+  - conteudo : JSONField
+  - gerada_em : datetime
+  - arbitro : str
+  --
+  + gerar_automaticamente(partida) : Sumula
+  + registrar_ocorrencia(descricao) : void
+}
+
+class PlanilhaUpload {
+  - id : int
+  - arquivo : FileField
+  - enviado_por : Usuario
+  - enviado_em : datetime
+  - status : str  {pendente, validado, erro}
+  - relatorio_erros : JSONField
+  --
+  + validar() : bool
+  + processar() : list[Partida]
+  + verificar_padroes() : void
+}
+
+' ──────────── RELACIONAMENTOS ────────────
+Atletica "1" --> "1" Capitao       : é gerenciada por >
+Atletica "1" *-- "0..*" Atleta     : possui >
+Atletica "1" *-- "0..*" Equipe     : inscreve >
+
+Equipe "0..*" --> "1" Modalidade   : compete em >
+Equipe "1..*" o-- "1..*" Atleta    : formada por >\n{todos da mesma atlética}
+
+Partida "0..*" --> "2" Equipe      : disputa >
+Partida "1" --> "1" Modalidade     : pertence a >
+Partida "1" *-- "1" Sumula         : gera automaticamente >
+
+PlanilhaUpload "0..*" --> "0..*" Partida : cria em lote >
+
+Capitao "1" --> "1" Atletica       : representa >
+
+note bottom of Atleta
+  RN001: matrícula apenas números, 6-10 dígitos, única
+  RN002: data_nascimento não futura; idade 14–100 anos
+  Atleta participante de competição
+  homologada não pode ser excluído (LGPD)
+end note
+
+note bottom of Equipe
+  RN004: nome único por atlética/modalidade
+  Todos os atletas devem ser da mesma atlética
+  Tamanho entre min_atletas e max_atletas da Modalidade
+end note
+
+note right of Sumula
+  RN005: gerada automaticamente
+  ao criar uma Partida
+  Personalizada por Modalidade
+end note
+
+@enduml
